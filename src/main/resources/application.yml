@@ -1,0 +1,42 @@
+server:
+  port: 8088
+
+spring:
+  application:
+    name: kafka-demo
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 2s
+
+  kafka:
+    bootstrap-servers: localhost:9092
+
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: 3
+      properties:
+        spring.json.add.type.headers: true
+
+    consumer:
+      group-id: demo-group
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "com.example.kafkademo.model,java.lang,java.util"
+        spring.json.value.default.type: com.example.kafkademo.model.MessageDto
+        spring.json.use.type.headers: true
+
+    listener:
+      ack-mode: manual_immediate
+      missing-topics-fatal: false
+
+logging:
+  level:
+    com.example.kafkademo: DEBUG
+    org.apache.kafka: WARN

@@ -1,0 +1,33 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: notification-service
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: notification-service
+  # SMTP config cho JavaMailSender. Mac dinh dung Gmail SMTP.
+  # Truyen username/password qua bien moi truong de khong commit secret.
+  mail:
+    host: ${MAIL_HOST:smtp.gmail.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:0337041207loc@gmail.com}
+    password: ${MAIL_PASSWORD:hhja uwfo lphz tyrd}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+
+app:
+  kafka:
+    topic:
+      order-events: order-events
+  mail:
+
+    from: ${MAIL_FROM:BaoLoc@kafka-demo.local}
+
+    enabled: ${MAIL_ENABLED:true}
