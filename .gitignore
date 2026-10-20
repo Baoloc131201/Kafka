@@ -34,3 +34,6 @@ build/
 
 ### Logs ###
 *.log
+
+### Local secrets ###
+mail-brevo.yml

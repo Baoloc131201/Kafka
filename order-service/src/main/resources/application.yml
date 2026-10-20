@@ -12,8 +12,10 @@ spring:
       acks: all
       properties:
         enable.idempotence: true
+        # Khong gui ten class Java trong header: contract giua cac service la JSON, khong phai class.
+        spring.json.add.type.headers: false
 
 app:
   kafka:
     topic:
-      order-events: order-events
+      order-events: orders.events

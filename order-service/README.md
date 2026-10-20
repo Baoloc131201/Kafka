@@ -1,24 +1,36 @@
 # Kafka Learn — order-service + notification-service
 
-Hai Spring Boot app de hoc Kafka thuc te:
+Hai Spring Boot app de hoc Kafka theo huong thuc te:
 
 ```
-POST /orders ──> [order-service:8081] ──produce──> Kafka topic: order-events
-                                                          │
-                                                          └──consume──> [notification-service:8082] ──> log "notify customer..."
+POST /orders, /orders/{id}/pay, /orders/{id}/cancel
+        │
+        ▼
+[order-service:8081] ──produce──> topic: orders.events (3 partitions, key = orderId)
+                                         │
+                                         └──consume──> [notification-service:8082] ──> gui email
+                                                         │  loi tam thoi -> retry 3 lan (cach 2s)
+                                                         │  loi du lieu / het retry
+                                                         ▼
+                                       topic: orders.events.notification-service.DLT
 ```
 
 ## Topic & flow
 
-- Topic: `order-events` (3 partitions, replication 1)
-- Key: `customerId` -> moi customer luon vao **cung 1 partition** => giu thu tu su kien cua customer do
-- Value: JSON `OrderEvent { orderId, customerId, product, quantity, amount, createdAt }`
+| Topic | Owner | Muc dich |
+| --- | --- | --- |
+| `orders.events` | order-service | Moi thay doi trang thai don hang la 1 event. Service nao can thi tu subscribe voi group rieng |
+| `orders.events.notification-service.DLT` | notification-service | Message notification-service xu ly that bai, cho nguoi kiem tra / replay |
+
+- Key: `orderId` -> moi event cua cung 1 don vao **cung 1 partition** => consumer nhan dung thu tu CREATED -> PAID/CANCELLED
+- Value: JSON `OrderEvent { eventId, eventType, occurredAt, orderId, customerId, email, product, quantity, amount }`
+- `eventType`: `ORDER_CREATED`, `ORDER_PAID`, `ORDER_CANCELLED`
 - Consumer group: `notification-service`
 
-## 1. Chay ha tang (Kafka + Zookeeper + kafka-ui)
+## 1. Chay ha tang (Kafka + kafka-ui)
 
 ```bash
-docker compose up -d zookeeper kafka kafka-ui
+docker start zookeeper kafka kafka-ui   # hoac lan dau: docker compose up -d
 ```
 
 Mo Kafka UI: http://localhost:8080
@@ -30,95 +42,78 @@ cd order-service
 mvn spring-boot:run
 ```
 
-App lang nghe o `http://localhost:8081`. Khi khoi dong, `KafkaTopicConfig` se tu tao topic `order-events`.
-
 ## 3. Chay notification-service (consumer)
-
-Mo terminal khac:
 
 ```bash
 cd notification-service
-mvn spring-boot:run
+mvn spring-boot:run                       # mac dinh chi log, khong gui mail that
+# Gui mail that qua Gmail (dung App Password, KHONG commit vao code):
+MAIL_ENABLED=true MAIL_USERNAME=you@gmail.com MAIL_PASSWORD='app-password' mvn spring-boot:run
 ```
-
-App nay khong expose HTTP, chi `@KafkaListener` lang nghe topic.
 
 ## 4. Goi thu
 
 ```bash
-curl -X POST http://localhost:8081/orders \
-  -H "Content-Type: application/json" \
-  -d '{
-    "customerId": "C001",
-    "product": "iPhone 15",
-    "quantity": 1,
-    "amount": 25000000
-  }'
+# Tao don -> ORDER_CREATED
+curl -X POST http://localhost:8081/orders -H "Content-Type: application/json" \
+  -d '{"customerId":"C001","email":"test@example.com","product":"iPhone 15","quantity":1,"amount":25000000}'
+
+# Thanh toan -> ORDER_PAID   (hoac /cancel -> ORDER_CANCELLED)
+curl -X POST http://localhost:8081/orders/<orderId>/pay
+
+# Xem trang thai
+curl http://localhost:8081/orders/<orderId>
 ```
 
-### Quan sat
-
-- Log **order-service**:
-  ```
-  [producer] sent orderId=... key=C001 topic=order-events partition=2 offset=0
-  ```
-- Log **notification-service**:
-  ```
-  [consumer] received key=C001 partition=2 offset=0
-  [notify] -> customer=C001 | orderId=... | product=iPhone 15 x1 | amount=25000000
-  ```
-- Kafka UI -> Topics -> `order-events`: thay message JSON, partition, offset.
+Chuyen trang thai sai (vd huy don da PAID) -> 409. Don khong ton tai -> 404. Body sai -> 400.
 
 ## 5. Test cac kich ban Kafka
 
-### a) Partition theo key
-Gui nhieu order voi cung `customerId=C001`: tat ca message vao cung partition. Doi sang `C002`, `C003`: vao partition khac.
+### a) Thu tu theo key
+Tao don roi pay: 2 event cung `orderId` luon cung partition, offset tang dan.
 
-### b) Consumer group + scale
-Mo them 1 terminal nua chay them 1 instance notification-service (doi port):
-
+### b) Loi du lieu -> vao thang DLT (khong retry)
 ```bash
-cd notification-service
-SERVER_PORT=8083 mvn spring-boot:run
+docker exec -i kafka /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server localhost:29092 \
+  --topic orders.events --property parse.key=true --property key.separator='|' <<'MSG'
+bad-1|khong-phai-json
+noemail-1|{"eventId":"e1","eventType":"ORDER_CREATED","orderId":"noemail-1","customerId":"C9"}
+MSG
 ```
 
-Vi cung `group-id=notification-service`, Kafka tu **rebalance**: moi instance se nhan 1 phan partition (vd: 2 instance -> moi instance ~1-2 partition trong 3). Gui chum order va xem log -> phan tan ro rang.
-
-### c) Doi consumer group khac -> nhan lai tu dau
-Sua tam `spring.kafka.consumer.group-id` thanh `notification-service-2` roi chay lai: do `auto-offset-reset: earliest`, group moi se replay toan bo message cu trong topic.
-
-## Cau truc
-
+### c) Loi tam thoi -> retry 3 lan roi vao DLT
+Chay notification-service voi SMTP host sai roi tao don:
+```bash
+MAIL_ENABLED=true MAIL_HOST=smtp.invalid MAIL_USERNAME=x MAIL_PASSWORD=y mvn spring-boot:run
 ```
-Kafka_Learn/
-├── docker-compose.yml          # kafka + zookeeper + kafka-ui + redis (co san)
-├── order-service/              # producer (port 8081)
-│   ├── pom.xml
-│   └── src/main/
-│       ├── java/com/example/orderservice/
-│       │   ├── OrderServiceApplication.java
-│       │   ├── config/KafkaTopicConfig.java
-│       │   ├── controller/OrderController.java
-│       │   ├── model/OrderEvent.java
-│       │   └── producer/OrderEventProducer.java
-│       └── resources/application.yml
-└── notification-service/       # consumer (port 8082)
-    ├── pom.xml
-    └── src/main/
-        ├── java/com/example/notificationservice/
-        │   ├── NotificationServiceApplication.java
-        │   ├── consumer/OrderEventConsumer.java
-        │   ├── model/OrderEvent.java
-        │   └── service/NotificationService.java
-        └── resources/application.yml
+Log se co `[retry] attempt=1..4`, sau do message xuat hien trong DLT.
+
+### d) eventType moi ma consumer chua biet -> bo qua, khong ket
+Gui event voi `"eventType":"ORDER_SHIPPED"` -> log `unknown/missing eventType, skipping`.
+
+### e) Xem DLT
+Kafka UI -> Topics -> `orders.events.notification-service.DLT` -> Messages (header `kafka_dlt-exception-*` cho biet ly do), hoac:
+```bash
+docker exec kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:29092 \
+  --topic orders.events.notification-service.DLT --from-beginning --property print.key=true
 ```
+
+### f) Consumer group + scale
+Chay them 1 instance notification-service (`SERVER_PORT=8083 mvn spring-boot:run`): cung group nen Kafka rebalance, moi instance nhan 1 phan trong 3 partition.
 
 ## Diem ky thuat dang chu y
 
 | Khia canh | Cho |
 | --- | --- |
-| Producer idempotence | `application.yml` -> `enable.idempotence: true` -> tranh duplicate khi retry |
-| Acks | `acks=all` -> doi tat ca replica xac nhan, khong mat data |
-| Key chon partition | `kafkaTemplate.send(topic, key, event)` voi `key = customerId` |
-| JSON cross-service | Consumer tat `use.type.headers` + dat `default.type` -> 2 service xai 2 package khac nhau van deserialize OK |
-| Consumer group | Cung `group-id` -> share partitions; khac `group-id` -> moi group replay doc lap |
+| Producer idempotence + `acks=all` | order-service `application.yml` -> khong mat, khong trung khi producer retry |
+| Key chon partition | `OrderEventProducer` -> `key = orderId` |
+| Contract JSON, khong phu thuoc class Java | Producer tat type header, consumer doc thanh `OrderEvent` cua chinh no, bo qua field/eventType la |
+| Retry + DLT | notification-service `KafkaConsumerConfig` -> `DefaultErrorHandler` + `DeadLetterPublishingRecoverer` |
+| Secret | Mail credentials chi truyen qua bien moi truong |
+
+## Huong mo rong (thuc te hay lam them)
+
+- **Transactional Outbox**: hien don luu trong bo nho va gui Kafka ngay; thuc te luu DB + bang outbox de khong lech DB va Kafka.
+- **Idempotent consumer**: luu `eventId` da xu ly (Redis/DB) de khong gui mail 2 lan khi Kafka giao lai message.
+- **Schema Registry** (Avro/JSON Schema) thay cho viec copy `OrderEvent` sang 2 service.
+- Tao topic bang ha tang (Terraform/Strimzi), `replicas=3`, `min.insync.replicas=2`, tat `auto.create.topics.enable`.

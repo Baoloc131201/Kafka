@@ -21,19 +21,21 @@ public class OrderEventProducer {
     private String topic;
 
     public CompletableFuture<SendResult<String, OrderEvent>> send(OrderEvent event) {
-        // Dung customerId lam key -> moi customer luon vao cung 1 partition (giu thu tu).
-        String key = event.getCustomerId();
+        // Dung orderId lam key -> moi event cua cung 1 don luon vao cung 1 partition
+        // => consumer nhan dung thu tu CREATED -> PAID/CANCELLED.
+        String key = event.getOrderId();
         CompletableFuture<SendResult<String, OrderEvent>> future =
                 kafkaTemplate.send(topic, key, event);
 
         future.whenComplete((result, ex) -> {
             if (ex != null) {
-                log.error("[producer] send FAILED orderId={} err={}", event.getOrderId(), ex.getMessage(), ex);
+                log.error("[producer] send FAILED eventType={} orderId={} err={}",
+                        event.getEventType(), event.getOrderId(), ex.getMessage(), ex);
                 return;
             }
             var md = result.getRecordMetadata();
-            log.info("[producer] sent orderId={} key={} topic={} partition={} offset={}",
-                    event.getOrderId(), key, md.topic(), md.partition(), md.offset());
+            log.info("[producer] sent eventType={} orderId={} eventId={} topic={} partition={} offset={}",
+                    event.getEventType(), key, event.getEventId(), md.topic(), md.partition(), md.offset());
         });
         return future;
     }

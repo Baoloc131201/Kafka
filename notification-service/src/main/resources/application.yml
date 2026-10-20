@@ -4,17 +4,21 @@ server:
 spring:
   application:
     name: notification-service
+  # Cau hinh mail that (Brevo) nam o file rieng, da gitignore. Khong co file -> dung gia tri ben duoi.
+  # Tao file: copy mail-brevo.example.yml -> mail-brevo.yml roi dien thong tin.
+  config:
+    import: optional:classpath:mail-brevo.yml
   kafka:
     bootstrap-servers: localhost:9092
     consumer:
       group-id: notification-service
-  # SMTP config cho JavaMailSender. Mac dinh dung Gmail SMTP.
-  # Truyen username/password qua bien moi truong de khong commit secret.
+  # SMTP config mac dinh cho JavaMailSender. Gia tri trong mail-brevo.yml (neu co) se ghi de len.
+  # Khong ghi secret vao file nay vi file nay duoc commit.
   mail:
     host: ${MAIL_HOST:smtp.gmail.com}
     port: ${MAIL_PORT:587}
-    username: ${MAIL_USERNAME:0337041207loc@gmail.com}
-    password: ${MAIL_PASSWORD:hhja uwfo lphz tyrd}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
     properties:
       mail:
         smtp:
@@ -25,9 +29,10 @@ spring:
 app:
   kafka:
     topic:
-      order-events: order-events
+      order-events: orders.events
+      # DLT rieng cua consumer nay: <topic goc>.<ten service>.DLT
+      order-events-dlt: orders.events.notification-service.DLT
   mail:
-
     from: ${MAIL_FROM:BaoLoc@kafka-demo.local}
-
-    enabled: ${MAIL_ENABLED:true}
+    # Mac dinh tat: chi log noi dung mail. Bat trong mail-brevo.yml hoac bang MAIL_ENABLED=true
+    enabled: ${MAIL_ENABLED:false}
